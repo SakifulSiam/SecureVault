@@ -1,11 +1,12 @@
 build/
 .vs/
+.vscode/
 *.exe
 *.pdb
 *.ilk
-data/users.db
-data/*_vault.sv
-data/*_audit.log
-data/backups/
+*.tmp
+*.bak
+data/
 build-asan/
-data/.securevault.lock
+.DS_Store
+

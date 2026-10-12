@@ -136,6 +136,14 @@ bool AppController::copyPassword(int id)
     return ok;
 }
 
+bool AppController::copyUsername(int id)
+{
+    if (!session_) return false;
+    PasswordEntry *e = session_->vault().findPassword(id);
+    if (!e || e->username.empty()) return false;
+    return ClipboardManager::copyWithAutoClear(e->username, 30);
+}
+
 void AppController::setFavorite(int id, bool on)
 {
     if (!session_) return;
@@ -177,6 +185,21 @@ QVariantMap AppController::detail(int id) const
             {"category", QString::fromStdString(e->category)},
             {"changed", QDateTime::fromSecsSinceEpoch(e->passwordChangedAt).toString("d MMM yyyy")},
             {"historyCount", (int)e->history.size()}};
+}
+
+QVariantList AppController::passwordHistory(int id) const
+{
+    QVariantList out;
+    if (!session_) return out;
+    const PasswordEntry *e = session_->vault().findPassword(id);
+    if (!e) return out;
+    for (const auto &h : e->history) {
+        out.push_back(QVariantMap{
+            {"password", QString::fromStdString(h.password)},
+            {"date", QDateTime::fromSecsSinceEpoch(h.changedAt).toString("d MMM yyyy, HH:mm")}
+        });
+    }
+    return out;
 }
 
 QString AppController::revealPassword(int id)
@@ -337,7 +360,7 @@ bool AppController::saveNote(const QVariantMap &d)
         if (ok) session_->audit().log("UPDATE_NOTE", n.title);
     }
     if (!ok) { setError(tr("Couldn't save. Your vault was not changed.")); return false; }
-    ++rev_; emit revChanged();
+    ++rev_; emit revChanged(); emit healthChanged();
     return true;
 }
 
@@ -349,7 +372,7 @@ bool AppController::removeNote(int id)
     const std::string title = n->title;
     if (!session_->vault().deleteNote(id)) { setError(tr("Couldn't delete. Your vault was not changed.")); return false; }
     session_->audit().log("DELETE_NOTE", title);
-    ++rev_; emit revChanged();
+    ++rev_; emit revChanged(); emit healthChanged();
     return true;
 }
 
@@ -443,7 +466,7 @@ bool AppController::saveCard(const QVariantMap &d)
         if (ok) session_->audit().log("UPDATE_CARD", c.title);
     }
     if (!ok) { setError(tr("Couldn't save. Your vault was not changed.")); return false; }
-    ++rev_; emit revChanged();
+    ++rev_; emit revChanged(); emit healthChanged();
     return true;
 }
 
@@ -455,7 +478,7 @@ bool AppController::removeCard(int id)
     const std::string title = c->title;
     if (!session_->vault().deleteCard(id)) { setError(tr("Couldn't delete. Your vault was not changed.")); return false; }
     session_->audit().log("DELETE_CARD", title);
-    ++rev_; emit revChanged();
+    ++rev_; emit revChanged(); emit healthChanged();
     return true;
 }
 
@@ -502,7 +525,27 @@ void AppController::setFavoriteOf(const QString &kind, int id, bool on)
     bool ok = false;
     if (kind == "note") { if (SecureNote *n = v.findNote(id)) { SecureNote d = *n; d.favorite = on; ok = v.updateNote(d); } }
     else if (kind == "card") { if (CardItem *c = v.findCard(id)) { CardItem d = *c; d.favorite = on; ok = v.updateCard(d); } }
-    if (ok) { ++rev_; emit revChanged(); }
+    if (ok) { ++rev_; emit revChanged(); emit healthChanged(); }
+}
+
+int AppController::totalNotes() const
+{
+    return session_ ? (int)session_->vault().getNotes().size() : 0;
+}
+
+int AppController::totalCards() const
+{
+    return session_ ? (int)session_->vault().getCards().size() : 0;
+}
+
+int AppController::totalFavorites() const
+{
+    if (!session_) return 0;
+    int count = 0;
+    for (const auto &p : session_->vault().getPasswords()) if (p.favorite) ++count;
+    for (const auto &n : session_->vault().getNotes()) if (n.favorite) ++count;
+    for (const auto &c : session_->vault().getCards()) if (c.favorite) ++count;
+    return count;
 }
 
 QVariantList AppController::paletteItems(const QString &query) const

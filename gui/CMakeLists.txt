@@ -15,8 +15,7 @@ qt_add_qml_module(SecureVaultGui URI SecureVault.Gui VERSION 1.0 QML_FILES qml/M
 qt_add_resources(SecureVaultGui assets PREFIX "/assets" BASE "${CMAKE_CURRENT_SOURCE_DIR}" FILES
     fonts/Inter-Regular.ttf fonts/Inter-Medium.ttf fonts/Inter-SemiBold.ttf fonts/JetBrainsMono-Regular.ttf fonts/JetBrainsMono-Medium.ttf
     icon/securevault.png
-    icons/layout-grid.svg icons/key-round.svg icons/file-text.svg icons/credit-card.svg icons/star.svg
-    icons/wand-sparkles.svg icons/shield-check.svg icons/activity.svg icons/settings.svg icons/lock.svg)
+    icons/layout-grid.svg icons/layout-grid-active.svg icons/key-round.svg icons/key-round-active.svg icons/file-text.svg icons/file-text-active.svg icons/credit-card.svg icons/credit-card-active.svg icons/star.svg icons/star-active.svg icons/wand-sparkles.svg icons/wand-sparkles-active.svg icons/shield-check.svg icons/shield-check-active.svg icons/activity.svg icons/activity-active.svg icons/settings.svg icons/settings-active.svg icons/lock.svg icons/lock-active.svg)
 target_link_libraries(SecureVaultGui PRIVATE securevault_core Qt6::Quick Qt6::QuickControls2 Qt6::Concurrent)
 # FileDialog (QtQuick.Dialogs) is a QML module that ships with Qt; no extra link needed.
 

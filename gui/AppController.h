@@ -77,6 +77,9 @@ class AppController : public QObject
     Q_PROPERTY(bool discarded READ discarded NOTIFY stateChanged)
     Q_PROPERTY(int rev READ rev NOTIFY revChanged)
     Q_PROPERTY(int total READ total NOTIFY healthChanged)
+    Q_PROPERTY(int totalNotes READ totalNotes NOTIFY healthChanged)
+    Q_PROPERTY(int totalCards READ totalCards NOTIFY healthChanged)
+    Q_PROPERTY(int totalFavorites READ totalFavorites NOTIFY healthChanged)
     Q_PROPERTY(int secondsLeft READ secondsLeft NOTIFY countdownChanged)
     Q_PROPERTY(int kdfIterations READ kdfIterations NOTIFY stateChanged)
     Q_PROPERTY(QString version READ version CONSTANT)
@@ -94,6 +97,9 @@ public:
     QString band() const { return QString::fromStdString(rep_.band); }
     int attention() const { return rep_.attentionCount; }
     int total() const { return rep_.total; }
+    int totalNotes() const;
+    int totalCards() const;
+    int totalFavorites() const;
     int rev() const { return rev_; }
     QString motionMode() const;                 // "system" | "reduce" | "full" (UI preference only)
     bool reduceMotion() const;
@@ -121,9 +127,11 @@ public:
     Q_INVOKABLE QVariantMap policy(const QString &password) const; // live checklist, from the real policy
     Q_INVOKABLE void search(const QString &q) { query_ = q; if (session_) model_.rebuild(*session_, q); }
     Q_INVOKABLE bool copyPassword(int id);   // copying happens in C++; QML gets success or failure only
+    Q_INVOKABLE bool copyUsername(int id);
     Q_INVOKABLE void setFavorite(int id, bool on);
     // Credential workflow. Secrets cross to QML only for an explicit reveal or generator output the user asked for.
     Q_INVOKABLE QVariantMap detail(int id) const;                 // non-secret fields only
+    Q_INVOKABLE QVariantList passwordHistory(int id) const;
     Q_INVOKABLE QString revealPassword(int id);                   // logs REVEAL_PASSWORD; QML clears it after 15 s
     Q_INVOKABLE bool saveCredential(const QVariantMap &draft);    // id 0 adds; otherwise updates; "password" empty = keep stored
     Q_INVOKABLE bool removeCredential(int id);

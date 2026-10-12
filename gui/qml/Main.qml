@@ -2,7 +2,6 @@ import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import QtQuick.Dialogs
-import QtQuick.Effects
 import SecureVault.Gui
 
 ApplicationWindow {
@@ -25,21 +24,36 @@ ApplicationWindow {
         background: Rectangle { radius: Theme.rSmall; color: Theme.surface2
             border.width: parent.activeFocus ? 2 : 1; border.color: parent.activeFocus ? Theme.accent : Theme.borderStrong }
     }
+    component SearchField: Field {
+        id: sf
+        rightPadding: clearBtn.visible ? 34 : 12
+        Rectangle {
+            id: clearBtn
+            visible: sf.text.length > 0
+            width: 22; height: 22; radius: 11
+            anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter
+            color: clearHov.hovered ? Theme.surface3 : "transparent"
+            Text { anchors.centerIn: parent; text: "✕"; color: Theme.text2; font.pixelSize: 11 }
+            HoverHandler { id: clearHov }
+            TapHandler { onTapped: { sf.clear(); sf.forceActiveFocus() } }
+        }
+    }
     component SecretField: Field {
         echoMode: TextInput.Password
         inputMethodHints: Qt.ImhSensitiveData | Qt.ImhNoPredictiveText | Qt.ImhNoAutoUppercase
     }
     component PrimaryButton: Button {
         id: b; implicitHeight: 40; leftPadding: 18; rightPadding: 18
-        contentItem: Text { text: b.text; color: "white"; font.weight: Font.Medium; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+        contentItem: Text { text: b.text; color: b.enabled ? "white" : Theme.muted; font.weight: Font.Medium; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
         background: Rectangle { radius: Theme.rSmall; color: b.enabled ? Theme.accentFill : Theme.surface3
             border.width: b.visualFocus ? 2 : 0; border.color: Theme.accent; opacity: b.pressed ? 0.85 : 1
             Behavior on opacity { NumberAnimation { duration: app.reduceMotion ? 0 : 120 } } }
     }
     component GhostButton: Button {
         id: g; implicitHeight: 36; leftPadding: 12; rightPadding: 12
-        contentItem: Text { text: g.text; color: Theme.text2; verticalAlignment: Text.AlignVCenter }
-        background: Rectangle { radius: Theme.rSmall; color: g.hovered ? Theme.surface3 : "transparent"
+        property bool active: false
+        contentItem: Text { text: g.text; color: g.active ? Theme.text : Theme.text2; font.weight: g.active ? Font.DemiBold : Font.Normal; verticalAlignment: Text.AlignVCenter }
+        background: Rectangle { radius: Theme.rSmall; color: g.active || g.hovered ? Theme.surface3 : "transparent"
             border.width: g.visualFocus ? 2 : 0; border.color: Theme.accent }
     }
 
@@ -47,34 +61,38 @@ ApplicationWindow {
     component CredDialog: Popup {
         id: d
         onOpened: app.draftOpen(true)
-        onClosed: app.draftOpen(false)
         property int editId: 0
         property bool changing: false
         property bool confirming: false
         property string shown: ""
         property string genInfo: ""
         property var strength: fPw.text !== "" ? app.assess(fPw.text) : null
-        modal: true; focus: true; padding: 20; width: 480; anchors.centerIn: Overlay.overlay
+        property var histList: []
+        property bool showHistory: false
+        modal: true; focus: true; padding: 20; width: 500; anchors.centerIn: Overlay.overlay
         closePolicy: Popup.CloseOnEscape
         background: Rectangle { radius: Theme.rLarge; color: Theme.surface3; border.color: Theme.border }
         enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: app.reduceMotion ? 0 : 200 } }
         function openFor(id) {
             editId = id; changing = id === 0; confirming = false; shown = ""; genInfo = ""; fPw.clear()
+            showHistory = false
+            histList = id ? app.passwordHistory(id) : []
             var x = id ? app.detail(id) : {}
             fTitle.text = x.title || ""; fSite.text = x.site || ""; fUser.text = x.username || ""
             fCat.text = x.category || ""; fNotes.text = x.notes || ""
-            open(); fTitle.forceActiveFocus()
+            open(); fTitle.focusField()
         }
-        onClosed: { shown = ""; fPw.clear() }
+        onClosed: { app.draftOpen(false); shown = ""; fPw.clear(); showHistory = false }
         Timer { id: hideTimer; interval: 15000; running: d.shown !== ""; onTriggered: d.shown = "" }
         Connections { target: Qt.application; function onStateChanged() { if (Qt.application.state !== Qt.ApplicationActive) d.shown = "" } }
         contentItem: ColumnLayout { spacing: 10
             Text { text: d.editId ? "Edit password" : "Add password"; color: Theme.text; font.pixelSize: 16; font.weight: Font.DemiBold }
-            Field { id: fTitle; Layout.fillWidth: true; placeholderText: "Title" }
-            Field { id: fSite; Layout.fillWidth: true; placeholderText: "Website (optional)" }
-            Field { id: fUser; Layout.fillWidth: true; placeholderText: "Username" }
-            Field { id: fCat; Layout.fillWidth: true; placeholderText: "Category (optional)" }
+            LField { id: fTitle; Layout.fillWidth: true; label: "Title" }
+            LField { id: fSite; Layout.fillWidth: true; label: "Website" }
+            LField { id: fUser; Layout.fillWidth: true; label: "Username" }
+            LField { id: fCat; Layout.fillWidth: true; label: "Category" }
             // stored password: masked, explicit reveal, auto-hides after 15 s
+            Text { visible: d.editId !== 0 && !d.changing; text: "Password"; color: Theme.text2; font.pixelSize: 12 }
             RowLayout { visible: d.editId !== 0 && !d.changing; Layout.fillWidth: true
                 Text { Layout.fillWidth: true; color: Theme.text; font.family: Theme.mono; elide: Text.ElideRight
                     text: d.shown !== "" ? d.shown : "••••••••••••" }
@@ -82,11 +100,37 @@ ApplicationWindow {
                 GhostButton { text: "Change password"; onClicked: { d.shown = ""; d.changing = true } } }
             RowLayout { visible: d.changing; Layout.fillWidth: true
                 SecretField { id: fPw; Layout.fillWidth: true; placeholderText: d.editId ? "New password" : "Password" }
+                GhostButton { text: fPw.echoMode === TextInput.Password ? "Show" : "Hide"
+                    onClicked: fPw.echoMode = (fPw.echoMode === TextInput.Password ? TextInput.Normal : TextInput.Password) }
                 GhostButton { text: "Generate"; onClicked: { var g = app.generate(20, true, true, true, true, true)
                     if (g.ok) { fPw.text = g.text; fPw.echoMode = TextInput.Normal; d.genInfo = "20 random characters, about " + g.bits + " bits" } } } }
-            Text { visible: d.changing && d.strength !== null; color: d.strength ? Theme.strengthColor(d.strength.label) : Theme.text2
-                text: d.strength ? d.strength.label + (d.strength.reason !== "" ? ": " + d.strength.reason : "") : "" }
+            ColumnLayout { visible: d.changing && fPw.text !== ""; Layout.fillWidth: true; spacing: 4
+                RowLayout { Layout.fillWidth: true
+                    Text { text: "Strength: "; color: Theme.text2; font.pixelSize: 12 }
+                    Text { text: d.strength ? d.strength.label : ""; color: d.strength ? Theme.strengthColor(d.strength.label) : Theme.text2; font.weight: Font.DemiBold; font.pixelSize: 12 }
+                    Text { visible: d.strength && d.strength.reason !== ""; text: "— " + d.strength.reason; color: Theme.muted; font.pixelSize: 12; Layout.fillWidth: true; elide: Text.ElideRight }
+                }
+                Rectangle { Layout.fillWidth: true; height: 4; radius: 2; color: Theme.surface2
+                    Rectangle {
+                        height: parent.height; radius: 2
+                        width: d.strength ? Math.max(12, parent.width * Math.min(d.strength.score, 100) / 100) : 0
+                        color: d.strength ? Theme.strengthColor(d.strength.label) : Theme.muted
+                    }
+                }
+            }
             Text { visible: d.genInfo !== "" && d.changing; color: Theme.text2; text: d.genInfo }
+            RowLayout { visible: d.editId !== 0 && d.histList.length > 0; Layout.fillWidth: true
+                GhostButton { text: (d.showHistory ? "▲ Hide password history (" : "▼ View password history (") + d.histList.length + ")"
+                    onClicked: d.showHistory = !d.showHistory } }
+            ColumnLayout { visible: d.editId !== 0 && d.showHistory && d.histList.length > 0; Layout.fillWidth: true; spacing: 4
+                Repeater {
+                    model: d.histList
+                    delegate: Rectangle { Layout.fillWidth: true; height: 32; radius: Theme.rSmall; color: Theme.surface2; border.color: Theme.border
+                        RowLayout { anchors.fill: parent; anchors.leftMargin: 10; anchors.rightMargin: 10
+                            Text { Layout.fillWidth: true; text: modelData.password; color: Theme.text; font.family: Theme.mono; font.pixelSize: 12; elide: Text.ElideRight }
+                            Text { text: modelData.date; color: Theme.muted; font.pixelSize: 11 } } } } }
+
+            Text { text: "Notes"; color: Theme.text2; font.pixelSize: 12 }
             TextArea { id: fNotes; Layout.fillWidth: true; Layout.preferredHeight: 72; placeholderText: "Notes"; wrapMode: TextEdit.Wrap
                 color: Theme.text; placeholderTextColor: Theme.muted; leftPadding: 12; topPadding: 8
                 background: Rectangle { radius: Theme.rSmall; color: Theme.surface2; border.width: parent.activeFocus ? 2 : 1; border.color: parent.activeFocus ? Theme.accent : Theme.borderStrong } }
@@ -110,7 +154,6 @@ ApplicationWindow {
     component NoteDialog: Popup {
         id: n
         onOpened: app.draftOpen(true)
-        onClosed: app.draftOpen(false)
         property int editId: 0
         property bool confirming: false
         modal: true; focus: true; padding: 20; width: 520; anchors.centerIn: Overlay.overlay
@@ -120,13 +163,14 @@ ApplicationWindow {
         function openFor(id) { editId = id; confirming = false
             var x = id ? app.noteDetail(id) : {}   // opening a note is the explicit action that loads its content
             nTitle.text = x.title || ""; nCat.text = x.category || ""; nBody.text = x.content || ""
-            open(); nTitle.forceActiveFocus() }
-        onClosed: nBody.text = ""
+            open(); nTitle.focusField() }
+        onClosed: { app.draftOpen(false); nBody.text = "" }
         Connections { target: Qt.application; function onStateChanged() { if (Qt.application.state !== Qt.ApplicationActive && !n.opened) nBody.text = "" } }
         contentItem: ColumnLayout { spacing: 10
             Text { text: n.editId ? "Edit note" : "Add note"; color: Theme.text; font.pixelSize: 16; font.weight: Font.DemiBold }
-            Field { id: nTitle; Layout.fillWidth: true; placeholderText: "Title" }
-            Field { id: nCat; Layout.fillWidth: true; placeholderText: "Category (optional)" }
+            LField { id: nTitle; Layout.fillWidth: true; label: "Title" }
+            LField { id: nCat; Layout.fillWidth: true; label: "Category" }
+            Text { text: "Note"; color: Theme.text2; font.pixelSize: 12 }
             TextArea { id: nBody; Layout.fillWidth: true; Layout.preferredHeight: 200; placeholderText: "Write your note"; wrapMode: TextEdit.Wrap
                 color: Theme.text; placeholderTextColor: Theme.muted; leftPadding: 12; topPadding: 8; font.family: Theme.mono
                 inputMethodHints: Qt.ImhSensitiveData | Qt.ImhNoPredictiveText
@@ -171,7 +215,6 @@ ApplicationWindow {
     component CardDialog: Popup {
         id: k
         onOpened: app.draftOpen(true)
-        onClosed: app.draftOpen(false)
         property int editId: 0
         property bool confirming: false
         modal: true; focus: true; padding: 20; width: 500; anchors.centerIn: Overlay.overlay
@@ -181,16 +224,17 @@ ApplicationWindow {
         function openFor(id) { editId = id; confirming = false
             var x = id ? app.cardDetail(id) : {}
             kTitle.text = x.title || ""; kHolder.text = x.cardholder || ""; kExp.text = x.expiry || ""; kNotes.text = x.notes || ""
-            sNum.reset(); sCvv.reset(); open(); kTitle.forceActiveFocus() }
-        onClosed: { sNum.reset(); sCvv.reset() }
+            sNum.reset(); sCvv.reset(); open(); kTitle.focusField() }
+        onClosed: { app.draftOpen(false); sNum.reset(); sCvv.reset() }
         contentItem: ColumnLayout { spacing: 10
             Text { text: k.editId ? "Edit card" : "Add card"; color: Theme.text; font.pixelSize: 16; font.weight: Font.DemiBold }
-            Field { id: kTitle; Layout.fillWidth: true; placeholderText: "Title" }
-            Field { id: kHolder; Layout.fillWidth: true; placeholderText: "Cardholder" }
+            LField { id: kTitle; Layout.fillWidth: true; label: "Title" }
+            LField { id: kHolder; Layout.fillWidth: true; label: "Cardholder" }
             CardSecret { id: sNum; Layout.fillWidth: true; cardId: k.editId; field: "number"; label: "Card number" }
             RowLayout { Layout.fillWidth: true; spacing: 10
-                Field { id: kExp; Layout.preferredWidth: 130; placeholderText: "Expiry (MM/YY)" }
+                LField { id: kExp; Layout.preferredWidth: 130; Layout.alignment: Qt.AlignTop; label: "Expiry (MM/YY)" }
                 CardSecret { id: sCvv; Layout.fillWidth: true; cardId: k.editId; field: "cvv"; label: "Security code" } }
+            Text { text: "Notes"; color: Theme.text2; font.pixelSize: 12 }
             TextArea { id: kNotes; Layout.fillWidth: true; Layout.preferredHeight: 60; placeholderText: "Notes"; wrapMode: TextEdit.Wrap
                 color: Theme.text; placeholderTextColor: Theme.muted; leftPadding: 12; topPadding: 8
                 background: Rectangle { radius: Theme.rSmall; color: Theme.surface2; border.width: parent.activeFocus ? 2 : 1; border.color: parent.activeFocus ? Theme.accent : Theme.borderStrong } }
@@ -211,13 +255,38 @@ ApplicationWindow {
         }
     }
 
-    component Icon: Item {
+    // Icons are baked in two colours (grey, accent) so they need no shader and work on any renderer.
+    component Icon: Image {
         property string name: ""
-        property color tint: Theme.text2
+        property bool active: false
         property int size: 18
-        implicitWidth: size; implicitHeight: size
-        Image { id: im; anchors.fill: parent; source: "qrc:/assets/icons/" + parent.name + ".svg"; sourceSize: Qt.size(parent.size * 2, parent.size * 2); visible: false }
-        MultiEffect { anchors.fill: parent; source: im; colorization: 1.0; colorizationColor: parent.tint }
+        width: size; height: size; sourceSize: Qt.size(size * 2, size * 2); fillMode: Image.PreserveAspectFit
+        Layout.preferredWidth: size; Layout.preferredHeight: size; Layout.maximumWidth: size; Layout.maximumHeight: size
+        source: "qrc:/assets/icons/" + name + (active ? "-active" : "") + ".svg"
+    }
+
+    component Check: CheckBox {
+        id: c; spacing: 8
+        indicator: Rectangle { implicitWidth: 20; implicitHeight: 20; x: c.leftPadding; y: c.topPadding + (c.availableHeight - height) / 2; radius: 4
+            color: c.checked ? Theme.accentFill : Theme.surface2; border.width: c.visualFocus ? 2 : 1; border.color: c.visualFocus ? Theme.accent : Theme.borderStrong
+            Text { anchors.centerIn: parent; text: "✓"; color: "white"; visible: c.checked; font.pixelSize: 13 } }
+        contentItem: Text { text: c.text; color: Theme.text2; leftPadding: c.indicator.width + c.spacing; wrapMode: Text.Wrap; verticalAlignment: Text.AlignVCenter }
+    }
+    component Slide: Slider {
+        id: s
+        background: Rectangle { x: s.leftPadding; y: s.topPadding + s.availableHeight / 2 - height / 2; width: s.availableWidth; height: 4; radius: 2; color: Theme.surface3
+            Rectangle { width: s.visualPosition * parent.width; height: parent.height; radius: 2; color: Theme.accentFill } }
+        handle: Rectangle { x: s.leftPadding + s.visualPosition * (s.availableWidth - width); y: s.topPadding + s.availableHeight / 2 - height / 2
+            width: 18; height: 18; radius: 9; color: Theme.accentText; border.width: s.visualFocus ? 2 : 0; border.color: "white" }
+    }
+    // Text field with a label that stays visible after typing.
+    component LField: ColumnLayout {
+        property string label: ""
+        property alias text: lf.text
+        function focusField() { lf.forceActiveFocus() }
+        spacing: 4
+        Text { text: parent.label; color: Theme.text2; font.pixelSize: 12 }
+        Field { id: lf; Layout.fillWidth: true }
     }
 
     // Shield with a keyhole cut from negative space. One colour, reads at 16 px.
@@ -253,13 +322,15 @@ ApplicationWindow {
                     text: first ? "Create your vault" : app.lockReason !== "" ? "Vault locked" : "Sign in" }
                 Text { Layout.alignment: Qt.AlignHCenter; color: Theme.text2; text: app.lockReason !== "" ? app.lockReason : "Stored only on this device." }
                 Text { visible: app.discarded; Layout.alignment: Qt.AlignHCenter; color: Theme.warning; text: "Unsaved changes were discarded when the vault locked." }
-                Field { id: user; Layout.fillWidth: true; placeholderText: "Username"; text: app.username; onAccepted: pw.forceActiveFocus() }
-                SecretField { id: pw; Layout.fillWidth: true; placeholderText: "Master password"; onAccepted: go.clicked() }
+                Text { text: "Username"; color: Theme.text2; font.pixelSize: 12 }
+                Field { id: user; Layout.fillWidth: true; text: app.username; onAccepted: pw.forceActiveFocus() }
+                Text { text: "Master password"; color: Theme.text2; font.pixelSize: 12 }
+                SecretField { id: pw; Layout.fillWidth: true; onAccepted: go.clicked() }
                 Column { visible: first; Layout.fillWidth: true; spacing: 4
                     Text { color: pol.lengthOk ? Theme.success : Theme.muted; text: (pol.lengthOk ? "Done: " : "Needed: ") + "at least 12 characters" }
                     Text { color: pol.notWeak ? Theme.success : Theme.muted; text: (pol.notWeak ? "Done: " : "Needed: ") + "not a common or simple pattern" }
                 }
-                CheckBox { id: ack; visible: first; Layout.fillWidth: true; palette.windowText: Theme.text2
+                Check { id: ack; visible: first; Layout.fillWidth: true;
                     text: "I understand a forgotten master password cannot be recovered." }
                 Text { visible: app.error !== ""; Layout.fillWidth: true; wrapMode: Text.Wrap; color: Theme.dangerText; text: app.error }
                 PrimaryButton { id: go; Layout.fillWidth: true; enabled: !app.busy && user.text.length > 0 && pw.text.length > 0 && (!first || (pol.ok && ack.checked))
@@ -330,7 +401,7 @@ ApplicationWindow {
                     Repeater { model: ["Dashboard", "Passwords", "Secure notes", "Cards", "Favorites", "Generator", "Security center", "Activity log", "Settings"]
                         delegate: ItemDelegate { id: dlg; Layout.fillWidth: true; text: modelData; onClicked: page = index
                             contentItem: RowLayout { spacing: 10
-                                Icon { Layout.leftMargin: 6; name: shellRoot.icons[index]; tint: page === index ? Theme.accentText : Theme.text2 }
+                                Icon { Layout.leftMargin: 6; name: shellRoot.icons[index]; active: page === index }
                                 Text { Layout.fillWidth: true; text: dlg.text; color: page === index ? Theme.accentText : Theme.text2; verticalAlignment: Text.AlignVCenter } }
                             background: Rectangle { radius: Theme.rSmall; color: page === index ? Theme.surface3 : parent.hovered ? Theme.surface2 : "transparent"
                                 Rectangle { width: 3; height: parent.height * 0.5; anchors.verticalCenter: parent.verticalCenter; radius: 2; color: Theme.accent; visible: page === index } } } }
@@ -342,69 +413,174 @@ ApplicationWindow {
                 }
             }
             StackLayout { Layout.fillWidth: true; Layout.fillHeight: true; currentIndex: page
-                // Dashboard: score ring, recommendations from the analyzer's counts, recent activity with details masked.
-                Item {
-                    RowLayout { anchors.centerIn: parent; spacing: 56
-                        ColumnLayout { spacing: 14
-                            Item { Layout.alignment: Qt.AlignHCenter; width: 240; height: 240
-                                property real shown: 0
-                                Component.onCompleted: ringAnim.start()
-                                NumberAnimation on shown { id: ringAnim; running: false; from: 0; to: app.score; duration: app.reduceMotion ? 0 : 700; easing.type: Easing.OutCubic }
-                                onShownChanged: ring.requestPaint()
-                                Canvas { id: ring; anchors.fill: parent
-                                    onPaint: { var c = getContext("2d"); c.reset(); c.lineWidth = 12; c.lineCap = "round"
-                                        c.strokeStyle = Theme.surface3; c.beginPath(); c.arc(120, 120, 104, 0, 6.2832); c.stroke()
-                                        c.strokeStyle = Theme.bandColor(app.band); c.beginPath()
-                                        c.arc(120, 120, 104, -1.5708, -1.5708 + 6.2832 * parent.shown / 100); c.stroke() } }
-                                Column { anchors.centerIn: parent
-                                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: app.score; color: Theme.text; font.pixelSize: 56; font.weight: Font.DemiBold }
-                                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: app.band; color: Theme.bandColor(app.band) } } }
-                            Text { Layout.alignment: Qt.AlignHCenter; color: Theme.text2
-                                text: app.total === 0 ? "No passwords saved yet." : app.attention === 0 ? "All " + app.total + " passwords look healthy." : app.attention + " of " + app.total + " passwords need attention." }
+                // Dashboard: command center, stat cards, score ring, recommendations, and recent activity.
+                ScrollView { id: dashScroll; clip: true; contentWidth: availableWidth
+                    ColumnLayout {
+                        x: 28; y: 24; width: dashScroll.availableWidth - 56
+                        spacing: 20
+
+                        // Header + Quick actions
+                        RowLayout {
+                            Layout.fillWidth: true
+                            ColumnLayout {
+                                spacing: 2
+                                Text { text: "Dashboard"; color: Theme.text; font.pixelSize: 22; font.weight: Font.DemiBold }
+                                Text { text: "Welcome back, " + app.username + ". Your vault is securely unlocked."; color: Theme.text2; font.pixelSize: 13 }
+                            }
+                            Item { Layout.fillWidth: true }
+                            RowLayout {
+                                spacing: 8
+                                PrimaryButton { text: "+ Add password"; onClicked: cred.openFor(0) }
+                                GhostButton { text: "+ Note"; onClicked: note.openFor(0) }
+                                GhostButton { text: "+ Card"; onClicked: card.openFor(0) }
+                                GhostButton { text: "⚡ Generator"; onClicked: shellRoot.page = 5 }
+                            }
                         }
-                        ColumnLayout { Layout.preferredWidth: 360; spacing: 8
-                            Text { text: "What to do next"; color: Theme.text; font.pixelSize: 16; font.weight: Font.DemiBold }
+
+                        // 4 Overview Metric Cards
+                        RowLayout {
+                            Layout.fillWidth: true; spacing: 14
                             Repeater {
-                                model: { var r = []
-                                    if (app.total === 0) r.push({t: "Add your first password", p: 1})
-                                    if (app.reusedCount > 0) r.push({t: "Replace " + app.reusedCount + " reused " + (app.reusedCount === 1 ? "password" : "passwords"), p: 6})
-                                    if (app.weakCount > 0) r.push({t: "Strengthen " + app.weakCount + " weak " + (app.weakCount === 1 ? "password" : "passwords"), p: 6})
-                                    if (app.oldCount > 0) r.push({t: "Update " + app.oldCount + " " + (app.oldCount === 1 ? "password" : "passwords") + " older than 180 days", p: 6})
-                                    return r }
-                                delegate: RowLayout { Layout.fillWidth: true
-                                    Text { Layout.fillWidth: true; wrapMode: Text.Wrap; color: Theme.text; text: modelData.t }
-                                    GhostButton { text: "Review"; onClicked: shellRoot.page = modelData.p } } }
-                            Text { visible: app.total > 0 && app.attention === 0; color: Theme.success; text: "Nothing needs your attention." }
-                            Text { Layout.topMargin: 20; text: "Recent activity"; color: Theme.text; font.pixelSize: 16; font.weight: Font.DemiBold }
-                            Repeater { model: { app.rev; app.score; return app.activity().slice(0, 5) }
-                                delegate: RowLayout { Layout.fillWidth: true; spacing: 12
-                                    Text { Layout.preferredWidth: 130; color: Theme.text2; text: modelData.time }
-                                    Text { Layout.fillWidth: true; color: Theme.text; elide: Text.ElideRight; text: al.names[modelData.action] || modelData.action } } }   // details are left out on purpose
+                                model: [
+                                    {label: "Passwords", count: app.total, page: 1, icon: "key-round", hint: "Saved logins"},
+                                    {label: "Secure Notes", count: app.totalNotes, page: 2, icon: "file-text", hint: "Encrypted notes"},
+                                    {label: "Payment Cards", count: app.totalCards, page: 3, icon: "credit-card", hint: "Payment cards"},
+                                    {label: "Favorites", count: app.totalFavorites, page: 4, icon: "star", hint: "Starred items"}
+                                ]
+                                delegate: Rectangle {
+                                    Layout.fillWidth: true; height: 80; radius: Theme.rMed
+                                    color: cardHov.hovered ? Theme.surface3 : Theme.surface2; border.color: Theme.border
+                                    HoverHandler { id: cardHov; cursorShape: Qt.PointingHandCursor }
+                                    TapHandler { onTapped: shellRoot.page = modelData.page }
+                                    RowLayout {
+                                        anchors.fill: parent; anchors.margins: 14; spacing: 12
+                                        Rectangle {
+                                            width: 40; height: 40; radius: Theme.rSmall; color: Theme.surface1
+                                            Icon { anchors.centerIn: parent; name: modelData.icon; active: true; size: 20 }
+                                        }
+                                        ColumnLayout {
+                                            Layout.fillWidth: true; spacing: 2
+                                            Text { text: modelData.count; color: Theme.text; font.pixelSize: 20; font.weight: Font.DemiBold }
+                                            Text { text: modelData.label; color: Theme.text2; font.pixelSize: 12; font.weight: Font.Medium }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Main Split: Health score & What to do next | Recent activity
+                        RowLayout {
+                            Layout.fillWidth: true; spacing: 20; Layout.alignment: Qt.AlignTop
+
+                            // Left card: Health score & Recommendations
+                            Rectangle {
+                                Layout.fillWidth: true; Layout.preferredWidth: 440; radius: Theme.rMed
+                                color: Theme.surface2; border.color: Theme.border
+                                implicitHeight: leftCol.implicitHeight + 36
+                                ColumnLayout {
+                                    id: leftCol; anchors.fill: parent; anchors.margins: 18; spacing: 14
+                                    Text { text: "Vault Health Score"; color: Theme.text; font.pixelSize: 16; font.weight: Font.DemiBold }
+
+                                    RowLayout {
+                                        spacing: 18; Layout.alignment: Qt.AlignHCenter
+                                        Item {
+                                            width: 130; height: 130
+                                            property real shown: 0
+                                            Component.onCompleted: ringAnim.start()
+                                            NumberAnimation on shown { id: ringAnim; running: false; from: 0; to: app.score; duration: app.reduceMotion ? 0 : 700; easing.type: Easing.OutCubic }
+                                            onShownChanged: ring.requestPaint()
+                                            Canvas { id: ring; anchors.fill: parent
+                                                onPaint: { var c = getContext("2d"); c.reset(); c.lineWidth = 10; c.lineCap = "round"
+                                                    c.strokeStyle = Theme.surface3; c.beginPath(); c.arc(65, 65, 54, 0, 6.2832); c.stroke()
+                                                    c.strokeStyle = Theme.bandColor(app.band); c.beginPath()
+                                                    c.arc(65, 65, 54, -1.5708, -1.5708 + 6.2832 * parent.shown / 100); c.stroke() } }
+                                            Column { anchors.centerIn: parent; spacing: 2
+                                                Text { anchors.horizontalCenter: parent.horizontalCenter; text: app.score; color: Theme.text; font.pixelSize: 32; font.weight: Font.DemiBold }
+                                                Text { anchors.horizontalCenter: parent.horizontalCenter; text: app.band; color: Theme.bandColor(app.band); font.pixelSize: 12 } }
+                                        }
+                                        ColumnLayout {
+                                            Layout.fillWidth: true; spacing: 6
+                                            Text { color: Theme.text; font.weight: Font.Medium; text: app.band }
+                                            Text { color: Theme.text2; font.pixelSize: 12; wrapMode: Text.Wrap; Layout.fillWidth: true
+                                                text: app.total === 0 ? "No passwords saved yet." : app.attention === 0 ? "All " + app.total + " passwords look strong and unique." : app.attention + " of " + app.total + " credentials need attention." }
+                                            GhostButton { text: "Open Security Center"; onClicked: shellRoot.page = 6 }
+                                        }
+                                    }
+
+                                    Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
+
+                                    Text { text: "Recommendations"; color: Theme.text; font.pixelSize: 14; font.weight: Font.DemiBold }
+                                    Repeater {
+                                        model: { var r = []
+                                            if (app.total === 0) r.push({t: "Add your first password", p: 1})
+                                            if (app.reusedCount > 0) r.push({t: "Replace " + app.reusedCount + " reused " + (app.reusedCount === 1 ? "password" : "passwords"), p: 6})
+                                            if (app.weakCount > 0) r.push({t: "Strengthen " + app.weakCount + " weak " + (app.weakCount === 1 ? "password" : "passwords"), p: 6})
+                                            if (app.oldCount > 0) r.push({t: "Update " + app.oldCount + " " + (app.oldCount === 1 ? "password" : "passwords") + " older than 180 days", p: 6})
+                                            return r }
+                                        delegate: RowLayout { Layout.fillWidth: true
+                                            Text { Layout.fillWidth: true; wrapMode: Text.Wrap; color: Theme.text; text: modelData.t; font.pixelSize: 13 }
+                                            GhostButton { text: "Review"; onClicked: shellRoot.page = modelData.p } } }
+                                    Text { visible: app.total > 0 && app.attention === 0; color: Theme.success; text: "✓ Vault is in top health." }
+                                }
+                            }
+
+                            // Right card: Recent activity
+                            Rectangle {
+                                Layout.fillWidth: true; Layout.preferredWidth: 380; radius: Theme.rMed
+                                color: Theme.surface2; border.color: Theme.border
+                                implicitHeight: leftCol.implicitHeight + 36
+                                ColumnLayout {
+                                    anchors.fill: parent; anchors.margins: 18; spacing: 10
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        Text { text: "Recent Activity"; color: Theme.text; font.pixelSize: 16; font.weight: Font.DemiBold }
+                                        Item { Layout.fillWidth: true }
+                                        GhostButton { text: "View all"; onClicked: shellRoot.page = 7 }
+                                    }
+                                    Text { text: "Audit trail (never records passwords)"; color: Theme.muted; font.pixelSize: 12 }
+                                    ListView {
+                                        Layout.fillWidth: true; Layout.fillHeight: true; clip: true
+                                        model: { app.rev; app.score; return app.activity().slice(0, 6) }
+                                        delegate: RowLayout {
+                                            width: ListView.view.width; height: 34; spacing: 10
+                                            Rectangle { width: 6; height: 6; radius: 3; color: Theme.accent }
+                                            Text { Layout.fillWidth: true; color: Theme.text; font.pixelSize: 12; elide: Text.ElideRight; text: al.names[modelData.action] || modelData.action }
+                                            Text { color: Theme.text2; font.pixelSize: 11; text: modelData.time }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
-                // Passwords: dense rows, summaries only. No reveal in this build.
+
+                // Passwords: dense rows with category badges, quick copy and website launch.
                 ColumnLayout { anchors.margins: 24; spacing: 12
                     RowLayout { Layout.leftMargin: 24; Layout.rightMargin: 24; Layout.topMargin: 24
                         Text { Layout.fillWidth: true; text: "Passwords"; color: Theme.text; font.pixelSize: 20; font.weight: Font.DemiBold }
-                        PrimaryButton { text: "Add password"; onClicked: cred.openFor(0) } }
-                    Field { Layout.fillWidth: true; Layout.leftMargin: 24; Layout.rightMargin: 24; placeholderText: "Search title, website, username"; onTextChanged: app.search(text) }
+                        PrimaryButton { text: "+ Add password"; onClicked: cred.openFor(0) } }
+                    SearchField { Layout.fillWidth: true; Layout.leftMargin: 24; Layout.rightMargin: 24; placeholderText: "Search title, website, username..."; onTextChanged: app.search(text) }
                     ListView { id: list; Layout.fillWidth: true; Layout.fillHeight: true; clip: true; model: app.credentials
                         Text { visible: list.count === 0; anchors.centerIn: parent; color: Theme.muted; text: app.total === 0 ? "No passwords yet. Add your first one." : "Nothing matches your search." }
-                        delegate: Rectangle { width: list.width; height: 52; color: hov.hovered ? Theme.surface2 : "transparent"
+                        delegate: Rectangle { width: list.width; height: 56; color: hov.hovered ? Theme.surface2 : "transparent"
                             HoverHandler { id: hov }
                             RowLayout { anchors.fill: parent; anchors.leftMargin: 24; anchors.rightMargin: 24; spacing: 12
-                                Rectangle { width: 32; height: 32; radius: Theme.rSmall; color: Qt.hsla((title.charCodeAt(0) * 47 % 360) / 360, 0.35, 0.28, 1)
+                                Rectangle { width: 34; height: 34; radius: Theme.rSmall; color: Qt.hsla((title.charCodeAt(0) * 47 % 360) / 360, 0.35, 0.28, 1)
                                     Text { anchors.centerIn: parent; text: title.charAt(0).toUpperCase(); color: Theme.text; font.weight: Font.DemiBold } }
-                                Column { Layout.fillWidth: true
+                                Column { Layout.fillWidth: true; spacing: 2
                                     Text { text: title; color: Theme.text; font.weight: Font.Medium; elide: Text.ElideRight; width: parent.width }
-                                    Text { text: (site !== "" ? site + ", " : "") + username; color: Theme.text2; elide: Text.ElideRight; width: parent.width } }
-                                Text { visible: isReused; text: "Reused"; color: Theme.warning }
-                                Text { visible: isOld; text: "Old"; color: Theme.warning }
-                                Text { text: strength; color: Theme.strengthColor(strength); font.weight: Font.Medium }
-                                GhostButton { text: favorite ? "Unstar" : "Star"; onClicked: app.setFavorite(id, !favorite) }
+                                    Text { text: (site !== "" ? site + " • " : "") + username; color: Theme.text2; elide: Text.ElideRight; width: parent.width; font.pixelSize: 12 } }
+                                GhostButton { visible: site !== ""; text: "↗ Visit"; onClicked: Qt.openUrlExternally(site.indexOf("://") > -1 ? site : "https://" + site) }
+                                Rectangle { visible: isReused; radius: 4; color: "#3B2500"; implicitHeight: 22; implicitWidth: 54
+                                    Text { anchors.centerIn: parent; text: "Reused"; color: Theme.warning; font.pixelSize: 11; font.weight: Font.Medium } }
+                                Rectangle { visible: isOld; radius: 4; color: "#3B2500"; implicitHeight: 22; implicitWidth: 38
+                                    Text { anchors.centerIn: parent; text: "Old"; color: Theme.warning; font.pixelSize: 11; font.weight: Font.Medium } }
+                                Rectangle { radius: 4; color: Theme.surface3; implicitHeight: 22; implicitWidth: strTxt.implicitWidth + 12
+                                    Text { id: strTxt; anchors.centerIn: parent; text: strength; color: Theme.strengthColor(strength); font.pixelSize: 11; font.weight: Font.Medium } }
+                                GhostButton { text: favorite ? "★" : "☆"; active: favorite; onClicked: app.setFavorite(id, !favorite) }
                                 GhostButton { text: "Edit"; onClicked: cred.openFor(id) }
-                                GhostButton { text: "Copy"; onClicked: win.toast(app.copyPassword(id) ? "Password copied" : "Copying isn't available on this platform.") }
+                                GhostButton { text: "Copy User"; onClicked: win.toast(app.copyUsername(id) ? "Username copied" : "No username to copy.") }
+                                GhostButton { text: "Copy Pass"; onClicked: win.toast(app.copyPassword(id) ? "Password copied (clears in 30s)" : "Copying failed.") }
                             } }
                     }
                 }
@@ -412,41 +588,51 @@ ApplicationWindow {
                 ColumnLayout { spacing: 12
                     RowLayout { Layout.leftMargin: 24; Layout.rightMargin: 24; Layout.topMargin: 24
                         Text { Layout.fillWidth: true; text: "Secure notes"; color: Theme.text; font.pixelSize: 20; font.weight: Font.DemiBold }
-                        PrimaryButton { text: "Add note"; onClicked: note.openFor(0) } }
-                    Field { id: nq; Layout.fillWidth: true; Layout.leftMargin: 24; Layout.rightMargin: 24; placeholderText: "Search title, category, content" }
+                        PrimaryButton { text: "+ Add note"; onClicked: note.openFor(0) } }
+                    SearchField { id: nq; Layout.fillWidth: true; Layout.leftMargin: 24; Layout.rightMargin: 24; placeholderText: "Search title, category, content..." }
                     ListView { id: nl; Layout.fillWidth: true; Layout.fillHeight: true; clip: true
                         model: { app.rev; return app.notes(nq.text) }
                         Text { visible: nl.count === 0; anchors.centerIn: parent; color: Theme.muted; text: nq.text === "" ? "No notes yet. Add your first one." : "Nothing matches your search." }
-                        delegate: Rectangle { width: nl.width; height: 48; color: nh.hovered ? Theme.surface2 : "transparent"
+                        delegate: Rectangle { width: nl.width; height: 50; color: nh.hovered ? Theme.surface2 : "transparent"
                             HoverHandler { id: nh }
                             RowLayout { anchors.fill: parent; anchors.leftMargin: 24; anchors.rightMargin: 24; spacing: 12
+                                Rectangle { width: 32; height: 32; radius: Theme.rSmall; color: Theme.surface3
+                                    Text { anchors.centerIn: parent; text: "📝"; font.pixelSize: 14 } }
                                 Text { Layout.fillWidth: true; text: modelData.title; color: Theme.text; font.weight: Font.Medium; elide: Text.ElideRight }
-                                Text { text: modelData.category; color: Theme.text2 }
-                                GhostButton { text: modelData.favorite ? "Unstar" : "Star"; onClicked: app.setFavoriteOf("note", modelData.id, !modelData.favorite) }
+                                Rectangle { visible: modelData.category !== ""; radius: 4; color: Theme.surface3; implicitHeight: 22; implicitWidth: ncat.implicitWidth + 12
+                                    Text { id: ncat; anchors.centerIn: parent; text: modelData.category; color: Theme.text2; font.pixelSize: 11 } }
+                                GhostButton { text: modelData.favorite ? "★" : "☆"; active: modelData.favorite; onClicked: app.setFavoriteOf("note", modelData.id, !modelData.favorite) }
                                 GhostButton { text: "Open"; onClicked: note.openFor(modelData.id) } } } }
                 }
 
-                // Cards: dense rows, number masked to its last four digits. Brand is shown, never stored.
+                // Cards: dense rows with virtual card badges and quick action copy.
                 ColumnLayout { spacing: 12
                     RowLayout { Layout.leftMargin: 24; Layout.rightMargin: 24; Layout.topMargin: 24
                         Text { Layout.fillWidth: true; text: "Cards"; color: Theme.text; font.pixelSize: 20; font.weight: Font.DemiBold }
-                        PrimaryButton { text: "Add card"; onClicked: card.openFor(0) } }
-                    Field { id: cq; Layout.fillWidth: true; Layout.leftMargin: 24; Layout.rightMargin: 24; placeholderText: "Search title, cardholder, notes" }
+                        PrimaryButton { text: "+ Add card"; onClicked: card.openFor(0) } }
+                    SearchField { id: cq; Layout.fillWidth: true; Layout.leftMargin: 24; Layout.rightMargin: 24; placeholderText: "Search title, cardholder, notes..." }
                     ListView { id: cl; Layout.fillWidth: true; Layout.fillHeight: true; clip: true
                         model: { app.rev; return app.cards(cq.text) }
                         Text { visible: cl.count === 0; anchors.centerIn: parent; color: Theme.muted; text: cq.text === "" ? "No cards yet. Add your first one." : "Nothing matches your search." }
-                        delegate: Rectangle { width: cl.width; height: 52; color: ch.hovered ? Theme.surface2 : "transparent"
+                        delegate: Rectangle { width: cl.width; height: 60; color: ch.hovered ? Theme.surface2 : "transparent"
                             HoverHandler { id: ch }
                             RowLayout { anchors.fill: parent; anchors.leftMargin: 24; anchors.rightMargin: 24; spacing: 12
-                                Column { Layout.fillWidth: true
+                                Rectangle {
+                                    width: 44; height: 30; radius: 4; color: Theme.cardColor(modelData.brand); border.color: Theme.border
+                                    Rectangle { width: 8; height: 6; radius: 1; color: Theme.chipColor; anchors.left: parent.left; anchors.leftMargin: 4; anchors.verticalCenter: parent.verticalCenter }
+                                    Text { anchors.right: parent.right; anchors.rightMargin: 4; anchors.bottom: parent.bottom; anchors.bottomMargin: 2; text: modelData.brand.substring(0, 4); color: "white"; font.pixelSize: 8; font.weight: Font.Bold }
+                                }
+                                Column { Layout.fillWidth: true; spacing: 2
                                     Text { text: modelData.title; color: Theme.text; font.weight: Font.Medium; elide: Text.ElideRight; width: parent.width }
-                                    Text { text: modelData.cardholder; color: Theme.text2; elide: Text.ElideRight; width: parent.width } }
-                                Text { text: modelData.brand; color: Theme.text2 }
+                                    Text { text: (modelData.cardholder !== "" ? modelData.cardholder + " • " : "") + modelData.brand; color: Theme.text2; elide: Text.ElideRight; width: parent.width; font.pixelSize: 12 } }
                                 Text { text: "•••• " + modelData.last4; color: Theme.text; font.family: Theme.mono }
-                                Text { text: modelData.expiry; color: Theme.text2 }
-                                GhostButton { text: modelData.favorite ? "Unstar" : "Star"; onClicked: app.setFavoriteOf("card", modelData.id, !modelData.favorite) }
+                                Text { text: modelData.expiry; color: Theme.text2; font.pixelSize: 12 }
+                                GhostButton { text: modelData.favorite ? "★" : "☆"; active: modelData.favorite; onClicked: app.setFavoriteOf("card", modelData.id, !modelData.favorite) }
+                                GhostButton { text: "Copy No."; onClicked: win.toast(app.copyCardField(modelData.id, "number") ? "Card number copied" : "Failed") }
+                                GhostButton { text: "Copy CVV"; onClicked: win.toast(app.copyCardField(modelData.id, "cvv") ? "CVV copied" : "Failed") }
                                 GhostButton { text: "Open"; onClicked: card.openFor(modelData.id) } } } }
                 }
+
 
                 // Favorites: starred passwords, notes and cards in one list. Titles only.
                 ColumnLayout { spacing: 12
@@ -465,7 +651,7 @@ ApplicationWindow {
                 }
 
                 // Generator: random characters or a passphrase. Exact bits; no score for passphrases (§5).
-                ColumnLayout { id: gen; spacing: 10; Layout.margins: 24
+                Item { ColumnLayout { id: gen; spacing: 10; anchors.fill: parent; anchors.margins: 24
                     property bool phrase: false
                     property string out: ""
                     property int bits: 0
@@ -480,31 +666,45 @@ ApplicationWindow {
                     function run() { var g = phrase ? app.generatePassphrase(words.value) : app.generate(len.value, cU.checked, cL.checked, cD.checked, cS.checked, cA.checked)
                         failed = !g.ok; out = g.ok ? g.text : ""; bits = g.ok ? g.bits : 0 }
                     Text { text: "Generator"; color: Theme.text; font.pixelSize: 20; font.weight: Font.DemiBold }
-                    RowLayout { GhostButton { text: "Random characters"; font.weight: gen.phrase ? Font.Normal : Font.DemiBold; onClicked: { gen.phrase = false; gen.out = "" } }
-                        GhostButton { text: "Passphrase"; font.weight: gen.phrase ? Font.DemiBold : Font.Normal; onClicked: { gen.phrase = true; gen.out = "" } } }
+                    RowLayout { GhostButton { text: "Random characters"; active: !gen.phrase; onClicked: { gen.phrase = false; gen.out = "" } }
+                        GhostButton { text: "Passphrase"; active: gen.phrase; onClicked: { gen.phrase = true; gen.out = "" } } }
                     RowLayout { visible: !gen.phrase; Text { color: Theme.text2; text: "Length " + len.value }
-                        Slider { id: len; from: 8; to: 128; stepSize: 1; value: 20; Layout.preferredWidth: 260 } }
+                        Slide { id: len; from: 8; to: 128; stepSize: 1; value: 20; Layout.preferredWidth: 260 } }
                     Flow { visible: !gen.phrase; Layout.preferredWidth: 520; spacing: 12
-                        CheckBox { id: cU; checked: true; text: "Uppercase"; palette.windowText: Theme.text2 }
-                        CheckBox { id: cL; checked: true; text: "Lowercase"; palette.windowText: Theme.text2 }
-                        CheckBox { id: cD; checked: true; text: "Digits"; palette.windowText: Theme.text2 }
-                        CheckBox { id: cS; checked: true; text: "Symbols"; palette.windowText: Theme.text2 }
-                        CheckBox { id: cA; checked: true; text: "Avoid look-alike characters"; palette.windowText: Theme.text2 } }
+                        Check { id: cU; checked: true; text: "Uppercase"; }
+                        Check { id: cL; checked: true; text: "Lowercase"; }
+                        Check { id: cD; checked: true; text: "Digits"; }
+                        Check { id: cS; checked: true; text: "Symbols"; }
+                        Check { id: cA; checked: true; text: "Avoid look-alike characters"; } }
                     RowLayout { visible: gen.phrase; Text { color: Theme.text2; text: "Words " + words.value }
-                        Slider { id: words; from: 3; to: 12; stepSize: 1; value: 5; Layout.preferredWidth: 260 } }
-                    PrimaryButton { text: "Generate"; onClicked: gen.run() }
+                        Slide { id: words; from: 3; to: 12; stepSize: 1; value: 5; Layout.preferredWidth: 260 } }
+                    RowLayout { spacing: 10
+                        PrimaryButton { text: "Generate"; onClicked: gen.run() }
+                        GhostButton { text: "↺ Re-generate"; onClicked: gen.run() }
+                    }
                     Text { visible: gen.failed; color: Theme.dangerText; text: "Pick at least one character type." }
                     Rectangle { visible: gen.out !== ""; Layout.preferredWidth: 520; implicitHeight: outText.implicitHeight + 24; radius: Theme.rMed; color: Theme.surface2; border.color: Theme.border
                         Text { id: outText; anchors.fill: parent; anchors.margins: 12; wrapMode: Text.WrapAnywhere; textFormat: Text.StyledText
                             font.family: Theme.mono; font.pixelSize: 16; color: Theme.text; text: gen.paint(gen.out) } }
+                    Rectangle { visible: gen.out !== ""; Layout.preferredWidth: 520; height: 6; radius: 3; color: Theme.surface3
+                        Rectangle {
+                            height: parent.height; radius: 3
+                            width: Math.min(parent.width, Math.max(16, parent.width * Math.min(gen.bits, 128) / 128))
+                            color: gen.bits < 50 ? Theme.dangerText : gen.bits < 80 ? Theme.warning : Theme.success
+                            Behavior on width { NumberAnimation { duration: 150 } }
+                        }
+                    }
                     Text { visible: gen.out !== ""; color: Theme.text2
-                        text: gen.phrase ? words.value + " random words from a list of 2048, about " + gen.bits + " bits."
-                                         : "Random characters, about " + gen.bits + " bits. Rated " + app.assess(gen.out).label + "." }
-                    GhostButton { visible: gen.out !== ""; text: "Copy"; onClicked: win.toast(app.copyGenerated() ? "Copied" : "Copying isn't available on this platform.") }
+                        text: gen.phrase ? words.value + " random words from BIP-39 list (~" + gen.bits + " bits entropy). Cryptographically secure."
+                                         : "Generated via system CSPRNG (~" + gen.bits + " bits entropy). Rated: " + app.assess(gen.out).label + "." }
+                    RowLayout { visible: gen.out !== ""; spacing: 10
+                        GhostButton { text: "Copy to clipboard"; onClicked: win.toast(app.copyGenerated() ? "Copied! Clears in 30s." : "Copying isn't available on this platform.") }
+                    }
                     Item { Layout.fillHeight: true }
                 }
+                }
                 // Security center: the analyzer's numbers and per-credential flags, nothing recomputed here.
-                ColumnLayout { spacing: 8; Layout.margins: 24
+                Item { ColumnLayout { spacing: 8; anchors.fill: parent; anchors.margins: 24
                     Text { text: "Security center"; color: Theme.text; font.pixelSize: 20; font.weight: Font.DemiBold }
                     Text { color: Theme.bandColor(app.band); text: app.score + " out of 100, " + app.band }
                     Text { color: Theme.text2; text: app.weakCount + " weak, " + app.reusedCount + " reused, " + app.oldCount + " not changed in over 180 days" }
@@ -517,6 +717,7 @@ ApplicationWindow {
                                 GhostButton { text: "Edit"; onClicked: cred.openFor(id) } } } }
                 }
 
+                }
                 // Activity log: plain text on disk, never contains passwords.
                 ColumnLayout { spacing: 8
                     Text { Layout.leftMargin: 24; Layout.topMargin: 24; text: "Activity log"; color: Theme.text; font.pixelSize: 20; font.weight: Font.DemiBold }
@@ -535,8 +736,8 @@ ApplicationWindow {
                 }
 
                 // Settings: facts come from the real backend. Backup is a copy of the ENCRYPTED file.
-                ColumnLayout { id: set; spacing: 10; property url picked: ""
-                    Layout.margins: 24
+                ScrollView { id: setScroll; clip: true; contentWidth: availableWidth
+                  ColumnLayout { id: set; spacing: 10; property url picked: ""; x: 24; y: 24; width: setScroll.availableWidth - 48
                     FileDialog { id: saveDlg; fileMode: FileDialog.SaveFile; nameFilters: ["SecureVault backup (*.sv)"]; defaultSuffix: "sv"; onAccepted: app.backupTo(selectedFile) }
                     FileDialog { id: openDlg; fileMode: FileDialog.OpenFile; nameFilters: ["SecureVault backup (*.sv)"]; onAccepted: set.picked = selectedFile }
                     Text { text: "Settings"; color: Theme.text; font.pixelSize: 20; font.weight: Font.DemiBold }
@@ -549,15 +750,14 @@ ApplicationWindow {
 
                     Text { Layout.topMargin: 16; text: "Appearance"; color: Theme.text; font.pixelSize: 16; font.weight: Font.DemiBold }
                     RowLayout { Text { color: Theme.text2; text: "Animations" }
-                        ComboBox { id: motionBox; model: ["Follow system setting", "Reduce", "Full"]
-                            currentIndex: app.motionMode === "reduce" ? 1 : app.motionMode === "full" ? 2 : 0
-                            onActivated: app.setMotionMode(["system", "reduce", "full"][currentIndex]) } }
+                        Repeater { model: [["system", "Follow system"], ["reduce", "Reduce"], ["full", "Full"]]
+                            delegate: GhostButton { text: modelData[1]; active: app.motionMode === modelData[0]; onClicked: app.setMotionMode(modelData[0]) } } }
                     Text { Layout.topMargin: 16; text: "Third-party licences"; color: Theme.text; font.pixelSize: 16; font.weight: Font.DemiBold }
                     Text { Layout.preferredWidth: 520; wrapMode: Text.Wrap; color: Theme.text2
                         text: "Qt (LGPL, dynamically linked). Inter and JetBrains Mono fonts (SIL Open Font License 1.1). Lucide icons (ISC). BIP-39 English word list (MIT). Licence texts are in the licenses folder next to the source." }
                     Text { Layout.topMargin: 16; text: "Master password"; color: Theme.text; font.pixelSize: 16; font.weight: Font.DemiBold }
                     GhostButton { visible: !mpBox.visible; text: "Change master password"; onClicked: { app.clearError(); mpBox.visible = true } }
-                    ColumnLayout { id: mpBox; visible: false; Layout.preferredWidth: 520; spacing: 8
+                    ColumnLayout { id: mpBox; visible: false; Layout.preferredWidth: 520; Layout.maximumWidth: 520; spacing: 8
                         property var pol: app.policy(mpNew.text)
                         Text { Layout.fillWidth: true; wrapMode: Text.Wrap; color: Theme.text2
                             text: "Your vault is re-encrypted with the new password. Backups made before this can't be restored." }
@@ -565,14 +765,14 @@ ApplicationWindow {
                         SecretField { id: mpNew; Layout.fillWidth: true; placeholderText: "New master password" }
                         Text { color: mpBox.pol.lengthOk ? Theme.success : Theme.muted; text: (mpBox.pol.lengthOk ? "Done: " : "Needed: ") + "at least 12 characters" }
                         Text { color: mpBox.pol.notWeak ? Theme.success : Theme.muted; text: (mpBox.pol.notWeak ? "Done: " : "Needed: ") + "not a common or simple pattern" }
-                        CheckBox { id: mpAck; palette.windowText: Theme.text2; text: "I understand a forgotten master password cannot be recovered." }
+                        Check { id: mpAck; text: "I understand a forgotten master password cannot be recovered." }
                         ProgressBar { visible: app.progress >= 0; Layout.fillWidth: true; from: 0; to: 100; value: app.progress }
                         Text { visible: app.error !== ""; Layout.fillWidth: true; wrapMode: Text.Wrap; color: Theme.dangerText; text: app.error }
                         RowLayout {
                             Button { text: app.busy ? "Working…" : "Change master password"; implicitHeight: 40
                                 enabled: !app.busy && mpOld.text.length > 0 && mpBox.pol.ok && mpAck.checked
                                 onClicked: { app.changeMasterPassword(mpOld.text, mpNew.text, mpAck.checked); mpOld.clear(); mpNew.clear() }
-                                contentItem: Text { text: parent.text; color: "white"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                contentItem: Text { text: parent.text; color: parent.enabled ? "white" : Theme.muted; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
                                 background: Rectangle { radius: Theme.rSmall; color: parent.enabled ? Theme.accentFill : Theme.surface3 } }
                             GhostButton { enabled: !app.busy; text: "Cancel"; onClicked: { mpOld.clear(); mpNew.clear(); mpAck.checked = false; mpBox.visible = false } } } }
                     Text { Layout.topMargin: 16; text: "Backup and restore"; color: Theme.text; font.pixelSize: 16; font.weight: Font.DemiBold }
@@ -587,12 +787,12 @@ ApplicationWindow {
                         RowLayout {
                             Button { text: "Restore vault"; implicitHeight: 40; enabled: !app.busy && rpw.text.length > 0
                                 onClicked: { app.restoreFrom(set.picked, rpw.text); rpw.clear(); set.picked = "" }
-                                contentItem: Text { text: parent.text; color: "white"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                contentItem: Text { text: parent.text; color: parent.enabled ? "white" : Theme.muted; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
                                 background: Rectangle { radius: Theme.rSmall; color: parent.enabled ? Theme.dangerFill : Theme.surface3 } }
                             GhostButton { text: "Cancel"; onClicked: { rpw.clear(); set.picked = "" } } } }
                     Item { Layout.fillHeight: true }
                 }
-
+                }
             }
         }
     }
