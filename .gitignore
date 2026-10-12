@@ -1,0 +1,11 @@
+build/
+.vs/
+*.exe
+*.pdb
+*.ilk
+data/users.db
+data/*_vault.sv
+data/*_audit.log
+data/backups/
+build-asan/
+data/.securevault.lock
